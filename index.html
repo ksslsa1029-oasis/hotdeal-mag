@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎁 통합 쇼핑 혜택 매거진</title>
+    <meta property="og:title" content="🔥 오늘 놓치면 후회할 쇼핑 혜택 총정리">
+    <meta property="og:description" content="핫딜부터 쿠폰, 카드사 이벤트까지 크롤러가 찾은 최신 정보를 확인하세요.">
+    <meta property="og:image" content="https://ksslsa1029-oasis.github.io/hotdeal_magazine.png">
+    <meta property="og:url" content="https://ksslsa1029-oasis.github.io/"> 
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;700;900&display=swap');
+        body { font-family: 'Pretendard', sans-serif; background-color: #f8fafc; }
+        .card-hover { transition: all 0.2s ease-in-out; }
+        .card-hover:hover { transform: translateY(-4px); box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1); }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useMemo } = React;
+        
+        // LAST_UPDATED 값은 update_deals.py에 의해 자동으로 갱신됩니다.
+        const LAST_UPDATED = "2025-12-19 08:30"; 
+
+        const DEALS = [
+            // --- AUTOMATION_START ---
+            [
+                { "category": "핫딜", "platform": "쿠팡", "productName": "입학 선물용 초등학생 책가방 세트", "currentPrice": 45000, "originalPrice": 89000, "badge": "엄마 추천", "sourceSite": "신학기 특가", "link": "#", "image": "https://placehold.co/80x80/ef4444/ffffff?text=BAG", "color": "red" }
+            ]
+            // --- AUTOMATION_END ---
+        ].flat();
+
+        const Badge = ({ text, color }) => {
+            const getBgColor = () => {
+                if (text === '엄마 추천') return 'bg-purple-500';
+                if (color === 'red') return 'bg-red-500';
+                if (color === 'green') return 'bg-green-500';
+                return 'bg-blue-500';
+            };
+            return (
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase ${getBgColor()}`}>
+                    {text}
+                </span>
+            );
+        };
+
+        const BenefitCard = ({ item }) => {
+            const isPriceAvailable = item.currentPrice > 0;
+            const discount = isPriceAvailable ? Math.round((1 - item.currentPrice / item.originalPrice) * 100) : null;
+
+            return (
+                <div className="card-hover bg-white rounded-2xl p-5 border border-slate-200 flex gap-4 items-center mb-4">
+                    <img src={item.image} className="w-20 h-20 rounded-xl object-cover shadow-sm bg-slate-100" alt="" />
+                    <div className="flex-grow">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-bold text-slate-400">{item.platform}</span>
+                            <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded-full font-medium text-slate-600">{item.category}</span>
+                            {item.badge && <Badge text={item.badge} color={item.color} />}
+                        </div>
+                        <h3 className="font-bold text-slate-800 text-lg leading-tight mb-2">{item.productName}</h3>
+                        <div className="flex items-end justify-between">
+                            <div>
+                                {isPriceAvailable ? (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-red-500 font-black text-xl">{discount}%</span>
+                                        <span className="font-black text-xl text-slate-900">{item.currentPrice.toLocaleString()}원</span>
+                                    </div>
+                                ) : (
+                                    <span className="text-blue-600 font-black text-lg">혜택 확인하기</span>
+                                )}
+                                <p className="text-xs text-slate-400 mt-0.5">{item.sourceSite}</p>
+                            </div>
+                            <a href={item.link} target="_blank" className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-700 transition shadow-sm">상세보기</a>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [filter, setFilter] = useState('전체');
+            const categories = ['전체', ...new Set(DEALS.map(d => d.category))];
+            const filtered = filter === '전체' ? DEALS : DEALS.filter(d => d.category === filter);
+
+            return (
+                <div className="max-w-2xl mx-auto px-4 py-10">
+                    <header className="mb-10 text-center">
+                        <div className="inline-block bg-purple-100 text-purple-600 px-3 py-1 rounded-full text-xs font-bold mb-4">👩‍🏫 MOM'S PICK UPDATING</div>
+                        <h1 className="text-4xl font-black text-slate-900 mb-2 tracking-tighter italic">SHOPPING MAG</h1>
+                        <p className="text-slate-500 text-sm font-medium">유치원부터 고딩까지, 엄마가 찾은 최신 혜택 • {LAST_UPDATED}</p>
+                    </header>
+
+                    <nav className="flex gap-2 mb-8 overflow-x-auto pb-2 scrollbar-hide">
+                        {categories.map(c => (
+                            <button 
+                                key={c}
+                                onClick={() => setFilter(c)}
+                                className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition ${filter === c ? 'bg-slate-900 text-white shadow-md' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50'}`}
+                            >
+                                {c}
+                            </button>
+                        ))}
+                    </nav>
+
+                    <div className="space-y-4">
+                        {filtered.length > 0 ? (
+                            filtered.map((item, idx) => <BenefitCard key={idx} item={item} />)
+                        ) : (
+                            <div className="text-center py-20 text-slate-400 font-medium">현재 카테고리에 새로운 혜택이 없습니다.</div>
+                        )}
+                    </div>
+
+                    <footer className="mt-20 pt-10 border-t border-slate-200 text-center">
+                        <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
+                            본 페이지는 GitHub Actions를 통해 매일 자동 갱신됩니다. 파트너스 활동의 일환으로 일정액의 수수료를 제공받을 수 있습니다.
+                        </p>
+                    </footer>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
