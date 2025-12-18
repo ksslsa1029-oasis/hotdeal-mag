@@ -1,0 +1,39 @@
+name: Daily Auto Shopping Magazine
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 매일 한국 시간 오전 9시 (UTC 0시)
+  workflow_dispatch: # 수동 실행 버튼 활성화
+
+permissions:
+  contents: write
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Run Collector (크롤링)
+        run: python collect_deals.py
+
+      - name: Run Updater (HTML 생성)
+        run: python update_deals.py
+
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add deals.csv index.html
+          git commit -m "Auto Update: $(date +'%Y-%m-%d %H:%M')" || echo "No changes to commit"
+          git push
