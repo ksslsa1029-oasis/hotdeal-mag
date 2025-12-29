@@ -13,7 +13,7 @@ RECOMMENDED_KEYWORDS = [
     '장난감', '교구', '학용품', '필기구', '백팩', '책가방',
     '문제집', '참고서', '스터디플래너', '독서실', '수험생',
     '태블릿', '아이패드', '갤럭시탭', '인강용', '노트북',
-    '운동화', '후드티', '패딩', '트레이닝복', '조거패츠',
+    '운동화', '후드티', '패딩', '트레이닝복', '조거팬츠',
     '보드게임', '슬라임', '닌텐도', '레고', '피규어', '도감',
     '곤충', '생물', '사슴벌레', '장수풍뎅이', '관찰키트', '자연관찰'
 ]
@@ -43,13 +43,13 @@ def collect_from_ppomppu():
     session = requests.Session()
     # 최신 브라우저 헤더를 더 정교하게 모사하여 차단 방지
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
         'Referer': 'https://www.google.com/',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
-        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
         'Sec-Ch-Ua-Mobile': '?0',
         'Sec-Ch-Ua-Platform': '"Windows"',
     }
@@ -83,26 +83,27 @@ def collect_from_ppomppu():
     
     # 뽐뿌의 게시글 리스트는 보통 'list0', 'list1' 클래스를 가진 tr 태그들입니다.
     rows = soup.select('tr.list0, tr.list1')
-    print(f"🔎 총 {len(rows)}개의 행(Row)을 발견했습니다.")
-
+    
     if not rows:
-        print("⚠️ 게시글 행을 찾지 못했습니다. 구조 분석을 위해 로그를 남깁니다.")
-        # 가끔 구조가 바뀔 경우를 대비해 table 요소를 직접 확인
+        print("⚠️ 클래스 기반 행 찾기 실패. id='main_list' 기반 백업 로직을 실행합니다.")
         table = soup.find('table', id='main_list')
         if table:
-            rows = table.find_all('tr')[1:] # 헤더 제외
-            print(f"💡 백업 로직으로 {len(rows)}개의 행을 찾았습니다.")
-        else:
-            print(f"DEBUG (HTML Snippet): {html_content[:1000]}")
-            return []
+            rows = table.find_all('tr', recursive=False)
+            # 헤더나 의미 없는 행 제외를 위해 필터링
+            rows = [r for r in rows if r.find('td', class_='eng v_middle')]
+    
+    print(f"🔎 총 {len(rows)}개의 잠재적 행(Row)을 분석합니다.")
 
     for idx, row in enumerate(rows):
         try:
-            # 1. 제목 및 링크 태그 찾기 (list_title 클래스 선호)
+            # 1. 제목 및 링크 태그 찾기
+            # 클래스 list_title을 우선 탐색하고 없으면 구조적으로 탐색
             title_tag = row.find(['font', 'span'], class_='list_title')
             if not title_tag:
-                # 보조: 클래스가 없는 경우 링크 텍스트 직접 탐색
-                title_tag = row.select_one('td:nth-of-type(3) a')
+                # 뽐뿌 구조가 바뀔 경우 td 내의 a 태그를 직접 찾음
+                td_list = row.find_all('td', recursive=False)
+                if len(td_list) >= 3:
+                    title_tag = td_list[2].find('a')
             
             if not title_tag:
                 continue
@@ -128,6 +129,9 @@ def collect_from_ppomppu():
                 # 이미지가 있거나(공지 아이콘), 숫자가 아니면 제외
                 if num_td.find('img') or not num_text.isdigit():
                     continue
+            else:
+                # 번호 영역이 없으면 일반 게시글이 아닐 확률이 높음
+                continue
 
             # 3. 플랫폼 및 상품명/가격 정제
             platform = "기타"
@@ -136,7 +140,7 @@ def collect_from_ppomppu():
                 platform = p_match.group(1)
             
             price = extract_price(full_title)
-            # 플랫폼 표시 제거 및 상품명만 추출
+            # 정규표현식을 이용해 불필요한 대괄호/괄호 제거
             product_name = re.sub(r'\[.*?\]', '', full_title).strip()
             product_name = re.sub(r'\(.*?\)', '', product_name).strip()
             
@@ -147,7 +151,7 @@ def collect_from_ppomppu():
             elif price > 100000:
                 badge = "HOT"
             
-            # 4. 썸네일 이미지 추출
+            # 4. 썸네일 이미지 추출 및 정규화
             img_tag = row.find('img', class_='thumb_border')
             img_url = ""
             if img_tag and img_tag.get('src'):
@@ -177,6 +181,7 @@ def collect_from_ppomppu():
             if len(collected_data) >= 25: break
             
         except Exception as e:
+            # 개별 행 파싱 실패 시 로그만 남기고 계속 진행
             print(f"⚠️ {idx}번 행 파싱 중 건너뜀: {e}")
             continue
             
