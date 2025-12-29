@@ -8,7 +8,7 @@ import time
 import random
 
 # --- 추천 필터링 키워드 (엄마 추천: 건우 관심사 및 교육/생활용품) ---
-# 7살 아들 건우가 좋아하는 곤충, 생물 관련 키워드가 포함되어 있습니다.
+# 7살 아들 건우가 좋아하는 곤충, 생물 관련 키워드와 교육용품 리스트입니다.
 RECOMMENDED_KEYWORDS = [
     '유치원', '초등학교', '중학교', '고등학생', '입학', '신학기', '어린이날',
     '장난감', '교구', '학용품', '필기구', '백팩', '책가방',
@@ -36,7 +36,7 @@ def extract_price(title):
 
 def get_soup(url, session):
     """지정된 URL에 접속하여 BeautifulSoup 객체를 반환하며, 상세 로그를 남깁니다."""
-    # 최신 Chrome 131 버전 헤더로 업데이트하여 봇 감지 우회 확률을 높입니다.
+    # 최신 브라우저 환경을 모방하여 봇 감지 회피
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -71,7 +71,7 @@ def get_soup(url, session):
 def collect_from_ppomppu():
     """뽐뿌 핫딜 게시판 수집 (데스크톱/모바일 다중 시도 및 정밀 파싱)"""
     session = requests.Session()
-    # PC 버전이 막힐 경우 모바일 버전이 더 수월하게 뚫리는 경우가 많습니다.
+    # PC 버전 차단 시 모바일 버전으로 자동 전환하여 수집 성공률 극대화
     urls = [
         "https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu", # PC 버전
         "https://m.ppomppu.co.kr/new/bbs_list.php?id=ppomppu"     # 모바일 버전
@@ -86,7 +86,7 @@ def collect_from_ppomppu():
         if not soup:
             continue
 
-        # 차단 메시지 정밀 확인
+        # 차단 메시지 확인
         block_keywords = ["접속이 제한", "Robot", "자동접속", "Access Denied", "IP가 차단", "보안절차"]
         if any(msg in html_raw for msg in block_keywords):
             print(f"❌ 차단 감지: {url} 버전은 현재 GitHub IP를 차단 중입니다.")
@@ -96,7 +96,7 @@ def collect_from_ppomppu():
         rows = []
         
         if is_mobile:
-            # 모바일 버전 파싱 (최신 리스트 구조 대응)
+            # 모바일 버전 최신 리스트 구조 대응
             rows = soup.select('.list_default li') or soup.select('li.common-list-item')
         else:
             # 데스크톱 버전 파싱
@@ -134,7 +134,7 @@ def collect_from_ppomppu():
                 base_url = "https://m.ppomppu.co.kr/new/" if is_mobile else "https://www.ppomppu.co.kr/zboard/"
                 link = base_url + href if not href.startswith('http') else href
 
-                # 공지 제외 (데스크톱 번호 체크)
+                # 공지 제외 (게시글 번호가 숫자인 경우만 수집)
                 if not is_mobile:
                     num_td = row.find('td', class_='eng v_middle')
                     if num_td:
@@ -151,7 +151,7 @@ def collect_from_ppomppu():
                 product_name = re.sub(r'\[.*?\]', '', full_title).strip()
                 product_name = re.sub(r'\(.*?\)', '', product_name).strip()
                 
-                # 뱃지 로직 (건우가 좋아하는 생물 키워드 우선)
+                # 뱃지 로직 (엄마 추천 키워드 우선 적용)
                 badge = "NEW"
                 if any(keyword in product_name for keyword in RECOMMENDED_KEYWORDS):
                     badge = "엄마 추천"
@@ -212,7 +212,7 @@ if __name__ == "__main__":
     print("🚀 [정밀 디버그 모드] 핫딜 수집 엔진 가동 시작")
     start_time = time.time()
     
-    # 랜덤 대기 (봇 감지 회피)
+    # 봇 감지 회피를 위한 랜덤 지연
     wait_time = random.uniform(2, 5)
     print(f"DEBUG: 봇 감지 회피를 위해 {wait_time:.1f}초 대기합니다...")
     time.sleep(wait_time)
@@ -225,4 +225,5 @@ if __name__ == "__main__":
         print("\n❌ [최종 실패] 모든 경로(PC/모바일)의 접속이 차단되었거나 사이트 구조가 완전히 변경되었습니다.")
         sys.exit(1)
         
-    print(f"⏱️ 총 소요 시간: {end_time - start_time:.2f}초" if 'end_time' in locals() else f"⏱️ 완료 시간: {time.strftime('%H:%M:%S')}")
+    end_time = time.time()
+    print(f"⏱️ 총 소요 시간: {end_time - start_time:.2f}초")
