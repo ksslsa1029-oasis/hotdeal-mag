@@ -6,8 +6,8 @@ import os
 import sys
 import time
 
-# --- 엄마 추천 키워드 (유치원~고등학생 타겟) ---
-# 건우가 좋아하는 곤충과 생물 관련 키워드도 포함되어 있습니다.
+# --- 추천 필터링 키워드 (엄마 추천: 건우 관심사 및 교육/생활용품) ---
+# 김건우 군이 좋아하는 곤충, 생물 키워드와 학생용 키워드를 통합 관리합니다.
 RECOMMENDED_KEYWORDS = [
     '유치원', '초등학교', '중학교', '고등학생', '입학', '신학기', '어린이날',
     '장난감', '교구', '학용품', '필기구', '백팩', '책가방',
@@ -24,6 +24,7 @@ def get_platform_color(platform):
     if '쿠팡' in p: return 'red'
     if '네이버' in p or 'n쇼핑' in p: return 'green'
     if '11번가' in p or 'g마켓' in p or '지마켓' in p or '옥션' in p: return 'red'
+    if '티몬' in p or '위메프' in p: return 'blue'
     return 'blue'
 
 def extract_price(title):
@@ -40,22 +41,25 @@ def collect_from_ppomppu():
     url = "https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu"
     
     session = requests.Session()
-    # 최신 브라우저 헤더를 모방하여 차단 방지 (User-Agent는 주기적으로 업데이트 권장)
+    # 최신 브라우저 헤더를 더 정교하게 모사하여 차단 방지
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
         'Referer': 'https://www.google.com/',
         'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
+        'Connection': 'keep-alive',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
     }
     
     try:
         print(f"🌐 뽐뿌 서버 접속 시도 중: {url}")
-        response = session.get(url, headers=headers, timeout=25)
+        response = session.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         
-        # 뽐뿌 특유의 한글 깨짐 방지 (euc-kr 대응)
+        # 뽐뿌 특유의 한글 깨짐 방지 (euc-kr 대응 및 자동 감지)
         if response.encoding.lower() == 'iso-8859-1':
             response.encoding = 'euc-kr'
         else:
@@ -64,71 +68,75 @@ def collect_from_ppomppu():
         print(f"✅ 접속 성공 (상태 코드: {response.status_code})")
         
         # 보안 페이지 또는 차단 여부 확인
-        if "사용자의 접속이 제한" in response.text or "Robot" in response.text:
-            print("❌ 차단됨: GitHub Actions IP가 뽐뿌에 의해 차단되었습니다.")
-            # 디버깅을 위해 응답 텍스트 일부 출력
-            print(f"DEBUG (응답 내용 일부): {response.text[:500]}")
+        html_content = response.text
+        if "사용자의 접속이 제한" in html_content or "Robot" in html_content or "자동접속" in html_content:
+            print("❌ 차단됨: GitHub Actions IP가 뽐뿌의 보안 시스템에 의해 감지되었습니다.")
+            print(f"DEBUG (응답 내용 일부): {html_content[:500]}")
             return []
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(html_content, 'html.parser')
     except Exception as e:
-        print(f"❌ 접속 실패: {e}")
+        print(f"❌ 접속 단계 치명적 실패: {e}")
         return []
     
     collected_data = []
     
-    # 1단계: 가장 일반적인 제목 셀렉터
-    # 뽐뿌는 보통 font.list_title 또는 span.list_title을 사용합니다.
-    title_elements = soup.select('.list_title')
-    
-    # 2단계: 실패 시 백업 셀렉터 (구조적 접근)
-    if not title_elements:
-        print("⚠️ 기본 셀렉터 실패. 백업 로직을 실행합니다.")
-        # 게시글 리스트 테이블 내의 링크를 직접 탐색
-        title_elements = soup.select('tr.list0 a > font') + soup.select('tr.list1 a > font')
+    # 뽐뿌의 게시글 리스트는 보통 'list0', 'list1' 클래스를 가진 tr 태그들입니다.
+    rows = soup.select('tr.list0, tr.list1')
+    print(f"🔎 총 {len(rows)}개의 행(Row)을 발견했습니다.")
 
-    if not title_elements:
-        print("❌ 데이터를 찾을 수 없습니다. 응답 HTML 구조를 확인하세요.")
-        # 구조 분석을 위해 로그에 HTML 일부 출력
-        print(f"DEBUG (HTML Snippet): {response.text[:1000]}")
-        return []
+    if not rows:
+        print("⚠️ 게시글 행을 찾지 못했습니다. 구조 분석을 위해 로그를 남깁니다.")
+        # 가끔 구조가 바뀔 경우를 대비해 table 요소를 직접 확인
+        table = soup.find('table', id='main_list')
+        if table:
+            rows = table.find_all('tr')[1:] # 헤더 제외
+            print(f"💡 백업 로직으로 {len(rows)}개의 행을 찾았습니다.")
+        else:
+            print(f"DEBUG (HTML Snippet): {html_content[:1000]}")
+            return []
 
-    print(f"🔎 후보 항목 {len(title_elements)}개 발견. 데이터 파싱 시작...")
-
-    for title_tag in title_elements:
+    for idx, row in enumerate(rows):
         try:
-            # 게시글 행(TR) 찾기
-            parent_tr = title_tag.find_parent('tr')
-            if not parent_tr: continue
+            # 1. 제목 및 링크 태그 찾기 (list_title 클래스 선호)
+            title_tag = row.find(['font', 'span'], class_='list_title')
+            if not title_tag:
+                # 보조: 클래스가 없는 경우 링크 텍스트 직접 탐색
+                title_tag = row.select_one('td:nth-of-type(3) a')
             
-            # 링크 태그 추출
-            link_tag = title_tag if title_tag.name == 'a' else title_tag.find_parent('a')
-            if not link_tag or not link_tag.get('href'): continue
-            
+            if not title_tag:
+                continue
+
             full_title = title_tag.get_text(strip=True)
-            if len(full_title) < 5: continue # 너무 짧은 텍스트는 유효한 제목이 아님
+            if not full_title or len(full_title) < 5:
+                continue
 
-            # 공지사항 및 광고글 제외 로직
-            # 뽐뿌는 일반 게시글 번호가 td.eng.v_middle에 숫자로 들어있습니다.
-            num_td = parent_tr.find('td', class_='eng v_middle')
-            if num_td:
-                num_text = num_td.get_text(strip=True)
-                # 이미지가 들어있거나 숫자가 아니면 공지/광고
-                if num_td.find('img') or not num_text.isdigit():
-                    continue
-
+            # 링크 추출
+            link_tag = title_tag if title_tag.name == 'a' else title_tag.find_parent('a')
+            if not link_tag or not link_tag.get('href'):
+                continue
+            
             # 상세 링크 완성
             href = link_tag['href']
             link = "https://www.ppomppu.co.kr/zboard/" + href if not href.startswith('http') else href
-            
-            # 플랫폼 추출 [플랫폼]
+
+            # 2. 공지사항 및 광고글 제외 로직
+            # 글 번호가 td.eng.v_middle에 숫자로 들어있는지 확인
+            num_td = row.find('td', class_='eng v_middle')
+            if num_td:
+                num_text = num_td.get_text(strip=True)
+                # 이미지가 있거나(공지 아이콘), 숫자가 아니면 제외
+                if num_td.find('img') or not num_text.isdigit():
+                    continue
+
+            # 3. 플랫폼 및 상품명/가격 정제
             platform = "기타"
             p_match = re.search(r'\[(.*?)\]', full_title)
             if p_match:
                 platform = p_match.group(1)
             
-            # 가격 및 상품명 정제
             price = extract_price(full_title)
+            # 플랫폼 표시 제거 및 상품명만 추출
             product_name = re.sub(r'\[.*?\]', '', full_title).strip()
             product_name = re.sub(r'\(.*?\)', '', product_name).strip()
             
@@ -139,8 +147,8 @@ def collect_from_ppomppu():
             elif price > 100000:
                 badge = "HOT"
             
-            # 썸네일 이미지 추출 및 정규화
-            img_tag = parent_tr.find('img', class_='thumb_border')
+            # 4. 썸네일 이미지 추출
+            img_tag = row.find('img', class_='thumb_border')
             img_url = ""
             if img_tag and img_tag.get('src'):
                 src = img_tag.get('src')
@@ -151,7 +159,6 @@ def collect_from_ppomppu():
                 else:
                     img_url = src
             else:
-                # 이미지가 없을 경우 플랫폼 로고 대용 이미지
                 img_url = f"https://placehold.co/80x80/f1f5f9/94a3b8?text={platform[:1]}"
 
             collected_data.append({
@@ -167,11 +174,10 @@ def collect_from_ppomppu():
                 "color": get_platform_color(platform)
             })
             
-            if len(collected_data) >= 25: break # 상위 25개 수집
+            if len(collected_data) >= 25: break
             
         except Exception as e:
-            # 개별 항목 파싱 실패 시 로그를 남기고 다음 항목 진행
-            print(f"⚠️ 항목 파싱 중 건너뜀: {e}")
+            print(f"⚠️ {idx}번 행 파싱 중 건너뜀: {e}")
             continue
             
     return collected_data
@@ -181,20 +187,20 @@ def save_to_csv(data):
     keys = ["category", "platform", "productName", "currentPrice", "originalPrice", "badge", "sourceSite", "link", "image", "color"]
     try:
         if not data:
-            print("⚠️ 수집된 데이터가 최종적으로 0개입니다. 저장을 중단합니다.")
+            print("⚠️ 수집된 데이터가 0개입니다. 저장을 취소하고 에러를 발생시킵니다.")
             sys.exit(1)
 
         with open('deals.csv', 'w', encoding='utf-8-sig', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=keys)
             writer.writeheader()
             writer.writerows(data)
-        print(f"✅ 최종 완료: {len(data)}개의 항목이 deals.csv에 업데이트되었습니다.")
+        print(f"✅ 최종 업데이트 성공: {len(data)}개의 항목이 저장되었습니다.")
     except Exception as e:
-        print(f"❌ 파일 저장 실패: {e}")
+        print(f"❌ CSV 저장 실패: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
-    print("🚀 [디버그 모드] 실시간 핫딜 수집 엔진 가동...")
+    print("🚀 [디버그/보강 모드] 핫딜 수집 엔진을 시작합니다.")
     start_time = time.time()
     
     deals = collect_from_ppomppu()
@@ -202,8 +208,7 @@ if __name__ == "__main__":
     if deals:
         save_to_csv(deals)
     else:
-        print("❌ 데이터 수집에 완전히 실패했습니다. 사이트 차단 또는 구조 변경을 확인하세요.")
-        # GitHub Actions에서 에러로 표시되도록 강제 종료
+        print("❌ 수집된 데이터가 없습니다. 사이트 차단 여부나 구조를 다시 확인해야 합니다.")
         sys.exit(1)
         
     end_time = time.time()
