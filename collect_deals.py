@@ -27,7 +27,6 @@ def get_platform_color(platform):
 
 def extract_price(title):
     """제목 문자열에서 가격 숫자를 추출합니다 (다양한 패턴 대응)."""
-    # 숫자와 콤마 조합 뒤에 '원'이 붙는 패턴 (공백 허용)
     match = re.search(r'([\d,]+)\s*원', title)
     if match:
         price_str = match.group(1).replace(',', '')
@@ -35,7 +34,7 @@ def extract_price(title):
     return 0
 
 def get_soup(url, session):
-    """지정된 URL에 접속하여 BeautifulSoup 객체를 반환합니다."""
+    """지정된 URL에 접속하여 BeautifulSoup 객체를 반환하며, 상세 로그를 남깁니다."""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -45,9 +44,14 @@ def get_soup(url, session):
     }
     
     try:
-        response = session.get(url, headers=headers, timeout=20)
-        response.raise_for_status()
+        print(f"DEBUG: {url} 접속 시도 중...")
+        response = session.get(url, headers=headers, timeout=25)
+        print(f"DEBUG: 응답 상태 코드: {response.status_code}")
         
+        if response.status_code != 200:
+            print(f"⚠️ {url} 접속 실패 (HTTP {response.status_code})")
+            return None, ""
+
         # 뽐뿌 인코딩 처리 (EUC-KR 강제 지정 및 폴백)
         try:
             response.encoding = 'euc-kr'
@@ -58,71 +62,80 @@ def get_soup(url, session):
             
         return BeautifulSoup(response.text, 'html.parser'), response.text
     except Exception as e:
-        print(f"⚠️ 접속 시도 중 오류 발생 ({url}): {e}")
+        print(f"❌ 접속 오류 발생 ({url}): {e}")
         return None, ""
 
 def collect_from_ppomppu():
-    """뽐뿌 핫딜 게시판 수집 (데스크톱/모바일 다중 시도)"""
+    """뽐뿌 핫딜 게시판 수집 (데스크톱/모바일 다중 시도 및 정밀 파싱)"""
     session = requests.Session()
     urls = [
         "https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu", # PC 버전
-        "https://m.ppomppu.co.kr/new/bbs_list.php?id=ppomppu"     # 모바일 버전 (차단 확률 낮음)
+        "https://m.ppomppu.co.kr/new/bbs_list.php?id=ppomppu"     # 모바일 버전
     ]
     
     collected_data = []
 
     for url in urls:
-        print(f"🌐 접속 시도 중: {url}")
+        print(f"\n🌐 현재 수집 대상: {url}")
         soup, html_raw = get_soup(url, session)
         
         if not soup:
             continue
 
-        # 차단 문구 확인
-        if any(msg in html_raw for msg in ["접속이 제한", "Robot", "자동접속"]):
-            print(f"❌ 차단 확인: {url} 버전은 현재 GitHub IP를 차단 중입니다.")
+        # 차단 메시지 정밀 확인
+        block_keywords = ["접속이 제한", "Robot", "자동접속", "Access Denied", "IP가 차단"]
+        if any(msg in html_raw for msg in block_keywords):
+            print(f"❌ 차단 감지: {url} 버전은 현재 GitHub IP를 차단 중입니다.")
             continue
 
         is_mobile = "m.ppomppu" in url
+        rows = []
         
         if is_mobile:
-            # 모바일 버전 파싱 로직
-            rows = soup.select('li.common-list-item') or soup.select('ul.list_default > li')
+            # 모바일 버전 파싱 로직 (다양한 선택자 대응)
+            rows = soup.select('li.common-list-item') or soup.select('ul.list_default > li') or soup.select('.list_default li')
         else:
             # 데스크톱 버전 파싱 로직
             rows = soup.select('tr.list0, tr.list1')
+            if not rows: # 클래스가 없을 경우 테이블 기반으로 재시도
+                main_table = soup.find('table', id='main_list')
+                if main_table:
+                    rows = main_table.find_all('tr', recursive=False)[1:] # 헤더 제외
 
-        print(f"🔎 {url}에서 후보 항목 {len(rows)}개 발견.")
+        print(f"🔎 후보 항목 {len(rows)}개 발견.")
 
         for row in rows:
             try:
                 if is_mobile:
-                    # 모바일 파싱
-                    title_tag = row.select_one('.title') or row.select_one('strong')
+                    title_tag = row.select_one('.title') or row.select_one('strong') or row.select_one('.subject')
                     link_tag = row.select_one('a')
                     img_tag = row.select_one('img')
                 else:
-                    # 데스크톱 파싱
-                    title_tag = row.find(['font', 'span'], class_='list_title')
+                    # 데스크톱 제목 탐색 (클래스 list_title 혹은 특정 td 내의 a)
+                    title_tag = row.find(['font', 'span'], class_='list_title') or row.select_one('td:nth-child(3) a')
                     if not title_tag: continue
-                    link_tag = title_tag.find_parent('a')
+                    link_tag = title_tag if title_tag.name == 'a' else title_tag.find_parent('a')
                     img_tag = row.find('img', class_='thumb_border')
 
                 if not title_tag or not link_tag: continue
 
                 full_title = title_tag.get_text(strip=True)
-                if len(full_title) < 5: continue
+                if not full_title or len(full_title) < 5: continue
 
                 # 링크 생성
-                href = link_tag['href']
+                href = link_tag.get('href', '')
+                if not href: continue
+                
                 base_url = "https://m.ppomppu.co.kr/new/" if is_mobile else "https://www.ppomppu.co.kr/zboard/"
                 link = base_url + href if not href.startswith('http') else href
 
-                # 공지 제외 (번호 체크)
+                # 공지 제외 (데스크톱 번호 체크)
                 if not is_mobile:
                     num_td = row.find('td', class_='eng v_middle')
-                    if num_td and (num_td.find('img') or not num_td.get_text(strip=True).isdigit()):
-                        continue
+                    if num_td:
+                        num_text = num_td.get_text(strip=True)
+                        if num_td.find('img') or not num_text.isdigit():
+                            continue
 
                 # 데이터 추출
                 platform = "기타"
@@ -140,7 +153,7 @@ def collect_from_ppomppu():
                 elif price > 100000:
                     badge = "HOT"
                 
-                # 이미지 주소
+                # 이미지 주소 정규화
                 img_url = ""
                 if img_tag and img_tag.get('src'):
                     src = img_tag.get('src')
@@ -164,45 +177,49 @@ def collect_from_ppomppu():
                 })
                 
                 if len(collected_data) >= 25: break
-            except:
+            except Exception as e:
+                # 개별 행 파싱 실패는 무시하고 다음 행 진행
                 continue
         
-        # 데이터가 하나라도 수집되었다면 다음 URL 시도하지 않음
         if collected_data:
+            print(f"✅ {url}에서 {len(collected_data)}개의 유효 데이터 수집 성공.")
             break
             
     return collected_data
 
 def save_to_csv(data):
-    """수집 데이터를 deals.csv로 저장"""
+    """수집 데이터를 deals.csv로 저장하며 성공 여부를 확인합니다."""
     keys = ["category", "platform", "productName", "currentPrice", "originalPrice", "badge", "sourceSite", "link", "image", "color"]
     try:
         if not data:
-            print("⚠️ 수집된 데이터가 최종적으로 0개입니다.")
+            print("⚠️ [ERROR] 수집된 데이터가 최종적으로 0개입니다. 프로세스를 중단합니다.")
             sys.exit(1)
 
         with open('deals.csv', 'w', encoding='utf-8-sig', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=keys)
             writer.writeheader()
             writer.writerows(data)
-        print(f"✅ 성공: {len(data)}개의 항목 저장 완료.")
+        print(f"🎉 파일 저장 성공: deals.csv에 {len(data)}개의 핫딜이 기록되었습니다.")
     except Exception as e:
-        print(f"❌ CSV 저장 실패: {e}")
+        print(f"❌ [CRITICAL] CSV 저장 실패: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
-    print("🚀 [수동 디버깅 모드] 핫딜 수집 엔진 가동...")
+    print("🚀 [정밀 디버그 모드] 핫딜 수집 엔진 가동 시작")
     start_time = time.time()
     
     # 랜덤 대기 (봇 감지 회피)
-    time.sleep(random.uniform(1, 3))
+    wait_time = random.uniform(2, 5)
+    print(f"DEBUG: 봇 감지 회피를 위해 {wait_time:.1f}초 대기합니다...")
+    time.sleep(wait_time)
     
     deals = collect_from_ppomppu()
     
     if deals:
         save_to_csv(deals)
     else:
-        print("❌ 수집 실패: PC/모바일 버전 모두 접속이 제한되었거나 구조가 변경되었습니다.")
+        print("\n❌ [최종 실패] 모든 경로(PC/모바일)의 접속이 차단되었거나 사이트 구조가 완전히 변경되었습니다.")
+        # GitHub Actions 로그에서 에러를 명확히 보여주기 위해 실패 코드로 종료
         sys.exit(1)
         
-    print(f"⏱️ 소요 시간: {time.time() - start_time:.2f}초")
+    print(f"⏱️ 총 소요 시간: {time.time() - start_time:.2f}초")
