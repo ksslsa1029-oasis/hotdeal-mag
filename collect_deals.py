@@ -9,6 +9,7 @@ import random
 
 # --- 추천 필터링 키워드 (엄마 추천: 건우 관심사 및 교육/생활용품) ---
 # 7살 아들 건우가 좋아하는 곤충, 생물 관련 키워드와 교육용품 리스트입니다.
+# 과학 잡지 및 도감 관련 키워드를 추가하여 더욱 풍성하게 필터링합니다.
 RECOMMENDED_KEYWORDS = [
     '유치원', '초등학교', '중학교', '고등학생', '입학', '신학기', '어린이날',
     '장난감', '교구', '학용품', '필기구', '백팩', '책가방',
@@ -16,10 +17,12 @@ RECOMMENDED_KEYWORDS = [
     '태블릿', '아이패드', '갤럭시탭', '인강용', '노트북',
     '운동화', '후드티', '패딩', '트레이닝복', '조거팬츠',
     '보드게임', '슬라임', '닌텐도', '레고', '피규어', '도감',
-    '곤충', '생물', '사슴벌레', '장수풍뎅이', '관찰키트', '자연관찰'
+    '곤충', '생물', '사슴벌레', '장수풍뎅이', '관찰키트', '자연관찰',
+    '과학잡지', '내셔널지오그래픽', '표본', '생물도감', '파브르'
 ]
 
 def get_platform_color(platform):
+    """플랫폼 이름에 따라 테마 색상을 결정합니다."""
     p = platform.lower()
     if '쿠팡' in p: return 'red'
     if '네이버' in p or 'n쇼핑' in p: return 'green'
@@ -28,16 +31,24 @@ def get_platform_color(platform):
 
 def extract_price(title):
     """제목 문자열에서 가격 숫자를 추출합니다 (다양한 패턴 대응)."""
-    # 숫자와 콤마 조합 뒤에 '원'이 붙는 패턴 또는 숫자로만 끝나는 패턴 탐색
-    match = re.search(r'([\d,]+)\s*원?', title)
+    # 1. '숫자원' 형태 탐색 (예: 15,900원)
+    match = re.search(r'([\d,]+)\s*원', title)
     if match:
         price_str = match.group(1).replace(',', '')
-        if price_str.isdigit() and len(price_str) > 2: # 너무 작은 숫자는 가격이 아닐 확률 높음
+        if price_str.isdigit():
             return int(price_str)
+            
+    # 2. '원'이 없어도 3자리 이상의 숫자 콤마 패턴 탐색 (예: 15,900)
+    match = re.search(r'([\d]{1,3}(?:,[\d]{3})+)', title)
+    if match:
+        price_str = match.group(1).replace(',', '')
+        return int(price_str)
+        
     return 0
 
 def get_soup(url, session):
     """지정된 URL에 접속하여 BeautifulSoup 객체를 반환하며, 상세 로그를 남깁니다."""
+    # 최신 Chrome 브라우저 헤더를 모방하여 보안 차단 회피
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -61,11 +72,11 @@ def get_soup(url, session):
             print(f"⚠️ {url} 접속 실패 (HTTP {response.status_code})")
             return None, ""
 
-        # 뽐뿌 인코딩 처리 (EUC-KR 강제 지정 및 폴백)
+        # 뽐뿌 특유의 인코딩 처리 (EUC-KR 강제 지정 및 폴백)
+        # response.content를 사용하여 인코딩 문제를 방지합니다.
         if response.encoding.lower() == 'iso-8859-1':
             response.encoding = 'euc-kr'
         elif not response.encoding or response.encoding.lower() == 'utf-8':
-            # 뽐뿌는 기본적으로 EUC-KR을 사용하므로 강제 적용 시도
             response.encoding = 'euc-kr'
             
         return BeautifulSoup(response.text, 'html.parser'), response.text
@@ -76,6 +87,7 @@ def get_soup(url, session):
 def collect_from_ppomppu():
     """뽐뿌 핫딜 게시판 수집 (데스크톱/모바일 다중 시도 및 정밀 파싱)"""
     session = requests.Session()
+    # PC 버전 차단 시 모바일 버전을 시도하여 수집 성공률을 극대화합니다.
     urls = [
         "https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu", # PC 버전
         "https://m.ppomppu.co.kr/new/bbs_list.php?id=ppomppu"     # 모바일 버전
@@ -93,15 +105,17 @@ def collect_from_ppomppu():
         # 차단 메시지 확인
         block_keywords = ["접속이 제한", "Robot", "자동접속", "Access Denied", "IP가 차단", "보안절차", "비정상적인 접근"]
         if any(msg in html_raw for msg in block_keywords):
-            print(f"❌ 차단 감지: {url} 버전은 현재 환경(GitHub IP 등)을 차단 중입니다.")
+            print(f"❌ 차단 감지: {url} 버전은 현재 환경(GitHub IP 등)에서 차단되었습니다.")
             continue
 
         is_mobile = "m.ppomppu" in url
         rows = []
         
         if is_mobile:
+            # 모바일 버전 파싱 (li 태그 기반)
             rows = soup.select('.list_default li') or soup.select('li.common-list-item') or soup.select('.bbsList li')
         else:
+            # PC 버전 파싱 (tr 태그 기반)
             rows = soup.select('tr.list0, tr.list1')
             if not rows:
                 main_table = soup.find('table', id='main_list')
@@ -111,16 +125,18 @@ def collect_from_ppomppu():
         print(f"🔎 후보 항목 {len(rows)}개 발견.")
 
         if not rows:
-            print(f"⚠️ {url}에서 행을 찾지 못했습니다. 구조가 변경되었을 수 있습니다.")
+            print(f"⚠️ {url}에서 유효한 데이터 행을 찾지 못했습니다.")
             continue
 
         for idx, row in enumerate(rows):
             try:
                 if is_mobile:
+                    # 모바일 파싱 로직
                     title_tag = row.select_one('.title') or row.select_one('strong') or row.select_one('.subject')
                     link_tag = row.select_one('a')
                     img_tag = row.select_one('img')
                 else:
+                    # 데스크톱 파싱 로직
                     title_tag = row.find(['font', 'span'], class_='list_title') or row.select_one('td:nth-child(3) a')
                     if not title_tag: continue
                     link_tag = title_tag if title_tag.name == 'a' else title_tag.find_parent('a')
@@ -137,6 +153,7 @@ def collect_from_ppomppu():
                 base_url = "https://m.ppomppu.co.kr/new/" if is_mobile else "https://www.ppomppu.co.kr/zboard/"
                 link = base_url + href if not href.startswith('http') else href
 
+                # 공지 및 광고 필터링
                 if not is_mobile:
                     num_td = row.find('td', class_='eng v_middle')
                     if num_td:
@@ -152,6 +169,7 @@ def collect_from_ppomppu():
                 product_name = re.sub(r'\[.*?\]', '', full_title).strip()
                 product_name = re.sub(r'\(.*?\)', '', product_name).strip()
                 
+                # 뱃지 로직 (엄마 추천 키워드 우선 적용)
                 badge = "NEW"
                 if any(keyword in product_name for keyword in RECOMMENDED_KEYWORDS):
                     badge = "엄마 추천"
@@ -159,13 +177,16 @@ def collect_from_ppomppu():
                 elif price > 100000:
                     badge = "HOT"
                 
+                # 이미지 주소 추출 및 정규화
                 img_url = ""
-                if img_tag and img_tag.get('src'):
-                    src = img_tag.get('src')
-                    if src.startswith('//'): img_url = "https:" + src
-                    elif src.startswith('/'): img_url = "https://www.ppomppu.co.kr" + src
-                    else: img_url = src
-                else:
+                if img_tag:
+                    src = img_tag.get('data-original') or img_tag.get('src') # 레이지 로딩 대응
+                    if src:
+                        if src.startswith('//'): img_url = "https:" + src
+                        elif src.startswith('/'): img_url = "https://www.ppomppu.co.kr" + src
+                        else: img_url = src
+                
+                if not img_url:
                     img_url = f"https://placehold.co/80x80/f1f5f9/94a3b8?text={platform[:1]}"
 
                 collected_data.append({
@@ -190,7 +211,8 @@ def collect_from_ppomppu():
             print(f"✅ {url}에서 {len(collected_data)}개의 유효 데이터 수집 성공.")
             break
         else:
-            time.sleep(random.uniform(1, 2))
+            # 다음 시도 전 잠시 대기하여 차단 회피
+            time.sleep(random.uniform(1.5, 3.0))
             
     return collected_data
 
@@ -215,9 +237,10 @@ def save_to_csv(data):
         sys.exit(1)
 
 if __name__ == "__main__":
-    print("🚀 [정밀 디버그 모드] 핫딜 수집 엔진 가동 시작")
+    print("🚀 [디버그/보강 모드] 핫딜 수집 엔진 가동 시작")
     start_time = time.time()
     
+    # 봇 감지 회피를 위한 초기 랜덤 지연
     wait_time = random.uniform(2, 5)
     print(f"DEBUG: 봇 감지 회피를 위해 {wait_time:.1f}초 대기합니다...")
     time.sleep(wait_time)
