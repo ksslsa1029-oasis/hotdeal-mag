@@ -7,18 +7,16 @@ import sys
 import time
 import random
 
-# --- 추천 필터링 키워드 (엄마 추천: 건우 관심사 및 교육/생활용품) ---
-# 7살 아들 건우가 좋아하는 곤충, 생물 관련 키워드와 교육용품 리스트입니다.
-# 과학 잡지 및 도감 관련 키워드를 추가하여 더욱 풍성하게 필터링합니다.
+# --- 추천 필터링 키워드 (엄마 추천 & 건우 취향 저격) ---
+# 김건우 군이 좋아하는 곤충, 생물, 과학 관련 키워드를 최우선으로 배치했습니다.
 RECOMMENDED_KEYWORDS = [
+    # 건우 맞춤형 키워드 (곤충/생물/과학)
+    '사슴벌레', '장수풍뎅이', '곤충', '생물', '도감', '파브르', '표본', '과학잡지', 
+    '내셔널지오그래픽', '자연관찰', '관찰키트', '현미경', '돋보기', '레고', '피규어',
+    # 유아/학생 교육용 키워드
     '유치원', '초등학교', '중학교', '고등학생', '입학', '신학기', '어린이날',
-    '장난감', '교구', '학용품', '필기구', '백팩', '책가방',
-    '문제집', '참고서', '스터디플래너', '독서실', '수험생',
-    '태블릿', '아이패드', '갤럭시탭', '인강용', '노트북',
-    '운동화', '후드티', '패딩', '트레이닝복', '조거팬츠',
-    '보드게임', '슬라임', '닌텐도', '레고', '피규어', '도감',
-    '곤충', '생물', '사슴벌레', '장수풍뎅이', '관찰키트', '자연관찰',
-    '과학잡지', '내셔널지오그래픽', '표본', '생물도감', '파브르'
+    '장난감', '교구', '학용품', '필기구', '백팩', '책가방', '문제집', '참고서',
+    '태블릿', '아이패드', '갤럭시탭', '인강용', '노트북', '운동화', '트레이닝복'
 ]
 
 def get_platform_color(platform):
@@ -48,37 +46,33 @@ def extract_price(title):
 
 def get_soup(url, session):
     """지정된 URL에 접속하여 BeautifulSoup 객체를 반환하며, 상세 로그를 남깁니다."""
-    # 최신 Chrome 브라우저 헤더를 모방하여 보안 차단 회피
+    # 최신 브라우저 지문을 모방하여 차단 방지
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
         'Referer': 'https://www.google.com/',
         'Cache-Control': 'no-cache',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Upgrade-Insecure-Requests': '1',
+        'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
         'DNT': '1'
     }
     
     try:
         print(f"DEBUG: {url} 접속 시도 중...")
-        response = session.get(url, headers=headers, timeout=30)
-        print(f"DEBUG: 응답 상태 코드: {response.status_code}")
+        response = session.get(url, headers=headers, timeout=20)
         
-        if response.status_code != 200:
-            print(f"⚠️ {url} 접속 실패 (HTTP {response.status_code})")
-            return None, ""
-
-        # 뽐뿌 특유의 인코딩 처리 (EUC-KR 강제 지정 및 폴백)
-        # response.content를 사용하여 인코딩 문제를 방지합니다.
-        if response.encoding.lower() == 'iso-8859-1':
+        # 뽐뿌 특유의 한글 깨짐 방지 (EUC-KR 강제 지정 및 폴백)
+        if response.encoding and response.encoding.lower() == 'iso-8859-1':
             response.encoding = 'euc-kr'
         elif not response.encoding or response.encoding.lower() == 'utf-8':
             response.encoding = 'euc-kr'
             
+        if response.status_code != 200:
+            print(f"⚠️ {url} 접속 실패 (상태 코드: {response.status_code})")
+            return None, ""
+
         return BeautifulSoup(response.text, 'html.parser'), response.text
     except Exception as e:
         print(f"❌ 접속 오류 발생 ({url}): {e}")
@@ -87,7 +81,6 @@ def get_soup(url, session):
 def collect_from_ppomppu():
     """뽐뿌 핫딜 게시판 수집 (데스크톱/모바일 다중 시도 및 정밀 파싱)"""
     session = requests.Session()
-    # PC 버전 차단 시 모바일 버전을 시도하여 수집 성공률을 극대화합니다.
     urls = [
         "https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu", # PC 버전
         "https://m.ppomppu.co.kr/new/bbs_list.php?id=ppomppu"     # 모바일 버전
@@ -112,11 +105,10 @@ def collect_from_ppomppu():
         rows = []
         
         if is_mobile:
-            # 모바일 버전 파싱 (li 태그 기반)
             rows = soup.select('.list_default li') or soup.select('li.common-list-item') or soup.select('.bbsList li')
         else:
-            # PC 버전 파싱 (tr 태그 기반)
-            rows = soup.select('tr.list0, tr.list1')
+            # PC 버전 파싱 (더 넓은 선택자 적용)
+            rows = soup.select('tr.list0, tr.list1') or soup.select('tr[align="center"]')
             if not rows:
                 main_table = soup.find('table', id='main_list')
                 if main_table:
@@ -131,13 +123,18 @@ def collect_from_ppomppu():
         for idx, row in enumerate(rows):
             try:
                 if is_mobile:
-                    # 모바일 파싱 로직
                     title_tag = row.select_one('.title') or row.select_one('strong') or row.select_one('.subject')
                     link_tag = row.select_one('a')
                     img_tag = row.select_one('img')
                 else:
-                    # 데스크톱 파싱 로직
-                    title_tag = row.find(['font', 'span'], class_='list_title') or row.select_one('td:nth-child(3) a')
+                    # 데스크톱 파싱 로직 보강
+                    title_tag = row.find(['font', 'span'], class_='list_title') or row.select_one('a font')
+                    if not title_tag: 
+                        # 클래스명이 없는 경우 게시글 제목 위치의 a 태그 탐색
+                        tds = row.find_all('td')
+                        if len(tds) >= 3:
+                            title_tag = tds[3].find('a') if is_mobile else tds[2].find('a')
+                    
                     if not title_tag: continue
                     link_tag = title_tag if title_tag.name == 'a' else title_tag.find_parent('a')
                     img_tag = row.find('img', class_='thumb_border')
@@ -169,18 +166,22 @@ def collect_from_ppomppu():
                 product_name = re.sub(r'\[.*?\]', '', full_title).strip()
                 product_name = re.sub(r'\(.*?\)', '', product_name).strip()
                 
-                # 뱃지 로직 (엄마 추천 키워드 우선 적용)
+                # 뱃지 로직: 건우 관심사(곤충/생물) 우선 순위 부여
                 badge = "NEW"
                 if any(keyword in product_name for keyword in RECOMMENDED_KEYWORDS):
-                    badge = "엄마 추천"
-                    print(f"✨ 키워드 매칭 성공: {product_name}")
+                    # 곤충/생물 관련이면 더 특별한 강조 (로그 출력)
+                    if any(insect in product_name for insect in ['사슴벌레', '장수풍뎅이', '곤충', '생물', '도감']):
+                        badge = "건우&엄마 추천"
+                        print(f"⭐ [건우 취향 저격] 발견: {product_name}")
+                    else:
+                        badge = "엄마 추천"
                 elif price > 100000:
                     badge = "HOT"
                 
-                # 이미지 주소 추출 및 정규화
+                # 이미지 추출 (Lazy Loading 대응)
                 img_url = ""
                 if img_tag:
-                    src = img_tag.get('data-original') or img_tag.get('src') # 레이지 로딩 대응
+                    src = img_tag.get('data-original') or img_tag.get('src')
                     if src:
                         if src.startswith('//'): img_url = "https:" + src
                         elif src.startswith('/'): img_url = "https://www.ppomppu.co.kr" + src
@@ -204,15 +205,13 @@ def collect_from_ppomppu():
                 
                 if len(collected_data) >= 30: break 
             except Exception as e:
-                print(f"⚠️ 항목 파싱 중 건너뜀 (Index {idx}): {e}")
                 continue
         
         if collected_data:
             print(f"✅ {url}에서 {len(collected_data)}개의 유효 데이터 수집 성공.")
             break
         else:
-            # 다음 시도 전 잠시 대기하여 차단 회피
-            time.sleep(random.uniform(1.5, 3.0))
+            time.sleep(random.uniform(2.0, 4.0))
             
     return collected_data
 
@@ -221,11 +220,11 @@ def save_to_csv(data):
     keys = ["category", "platform", "productName", "currentPrice", "originalPrice", "badge", "sourceSite", "link", "image", "color"]
     try:
         if not data:
-            print("⚠️ [ERROR] 수집된 데이터가 최종적으로 0개입니다. 프로세스를 중단합니다.")
+            print("⚠️ [ERROR] 수집된 데이터가 최종적으로 0개입니다.")
             sys.exit(1)
 
-        # 저장 전에 데이터 정렬 (엄마 추천이 위로 오게)
-        data.sort(key=lambda x: x['badge'] == '엄마 추천', reverse=True)
+        # '건우&엄마 추천' 아이템이 가장 위로 오게 정렬
+        data.sort(key=lambda x: (x['badge'] == '건우&엄마 추천', x['badge'] == '엄마 추천'), reverse=True)
 
         with open('deals.csv', 'w', encoding='utf-8-sig', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=keys)
@@ -237,21 +236,18 @@ def save_to_csv(data):
         sys.exit(1)
 
 if __name__ == "__main__":
-    print("🚀 [디버그/보강 모드] 핫딜 수집 엔진 가동 시작")
+    print("🚀 [정밀 디버그 모드] 핫딜 수집 엔진 가동 시작")
     start_time = time.time()
     
-    # 봇 감지 회피를 위한 초기 랜덤 지연
-    wait_time = random.uniform(2, 5)
-    print(f"DEBUG: 봇 감지 회피를 위해 {wait_time:.1f}초 대기합니다...")
-    time.sleep(wait_time)
+    # 봇 감지 회피 지연
+    time.sleep(random.uniform(2, 5))
     
     deals = collect_from_ppomppu()
     
     if deals:
         save_to_csv(deals)
     else:
-        print("\n❌ [최종 실패] 모든 경로(PC/모바일)의 접속이 차단되었거나 사이트 구조가 완전히 변경되었습니다.")
+        print("\n❌ [최종 실패] 모든 경로가 차단되었거나 구조가 완전히 변경되었습니다.")
         sys.exit(1)
         
-    end_time = time.time()
-    print(f"⏱️ 총 소요 시간: {end_time - start_time:.2f}초")
+    print(f"⏱️ 총 소요 시간: {time.time() - start_time:.2f}초")
