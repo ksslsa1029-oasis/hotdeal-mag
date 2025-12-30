@@ -38,7 +38,6 @@ def extract_price(title):
 
 def get_soup(url, session):
     """지정된 URL에 접속하여 BeautifulSoup 객체를 반환하며, 상세 로그를 남깁니다."""
-    # 최신 브라우저 환경을 더욱 정밀하게 모방
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -55,7 +54,6 @@ def get_soup(url, session):
     
     try:
         print(f"DEBUG: {url} 접속 시도 중...")
-        # 뽐뿌는 짧은 간격의 요청을 차단하므로 timeout을 충분히 줍니다.
         response = session.get(url, headers=headers, timeout=30)
         print(f"DEBUG: 응답 상태 코드: {response.status_code}")
         
@@ -66,6 +64,9 @@ def get_soup(url, session):
         # 뽐뿌 인코딩 처리 (EUC-KR 강제 지정 및 폴백)
         if response.encoding.lower() == 'iso-8859-1':
             response.encoding = 'euc-kr'
+        elif not response.encoding or response.encoding.lower() == 'utf-8':
+            # 뽐뿌는 기본적으로 EUC-KR을 사용하므로 강제 적용 시도
+            response.encoding = 'euc-kr'
             
         return BeautifulSoup(response.text, 'html.parser'), response.text
     except Exception as e:
@@ -75,7 +76,6 @@ def get_soup(url, session):
 def collect_from_ppomppu():
     """뽐뿌 핫딜 게시판 수집 (데스크톱/모바일 다중 시도 및 정밀 파싱)"""
     session = requests.Session()
-    # PC 버전 차단 시 모바일 버전으로 자동 전환하여 수집 성공률 극대화
     urls = [
         "https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu", # PC 버전
         "https://m.ppomppu.co.kr/new/bbs_list.php?id=ppomppu"     # 모바일 버전
@@ -90,7 +90,7 @@ def collect_from_ppomppu():
         if not soup:
             continue
 
-        # 차단 메시지 확인 (더 많은 키워드 추가)
+        # 차단 메시지 확인
         block_keywords = ["접속이 제한", "Robot", "자동접속", "Access Denied", "IP가 차단", "보안절차", "비정상적인 접근"]
         if any(msg in html_raw for msg in block_keywords):
             print(f"❌ 차단 감지: {url} 버전은 현재 환경(GitHub IP 등)을 차단 중입니다.")
@@ -100,10 +100,8 @@ def collect_from_ppomppu():
         rows = []
         
         if is_mobile:
-            # 모바일 버전 최신 리스트 구조 대응
             rows = soup.select('.list_default li') or soup.select('li.common-list-item') or soup.select('.bbsList li')
         else:
-            # 데스크톱 버전 파싱
             rows = soup.select('tr.list0, tr.list1')
             if not rows:
                 main_table = soup.find('table', id='main_list')
@@ -112,15 +110,17 @@ def collect_from_ppomppu():
 
         print(f"🔎 후보 항목 {len(rows)}개 발견.")
 
+        if not rows:
+            print(f"⚠️ {url}에서 행을 찾지 못했습니다. 구조가 변경되었을 수 있습니다.")
+            continue
+
         for idx, row in enumerate(rows):
             try:
                 if is_mobile:
-                    # 모바일 파싱 로직
                     title_tag = row.select_one('.title') or row.select_one('strong') or row.select_one('.subject')
                     link_tag = row.select_one('a')
                     img_tag = row.select_one('img')
                 else:
-                    # 데스크톱 파싱 로직
                     title_tag = row.find(['font', 'span'], class_='list_title') or row.select_one('td:nth-child(3) a')
                     if not title_tag: continue
                     link_tag = title_tag if title_tag.name == 'a' else title_tag.find_parent('a')
@@ -131,34 +131,27 @@ def collect_from_ppomppu():
                 full_title = title_tag.get_text(strip=True)
                 if not full_title or len(full_title) < 5: continue
 
-                # 링크 생성 및 정규화
                 href = link_tag.get('href', '')
                 if not href: continue
                 
                 base_url = "https://m.ppomppu.co.kr/new/" if is_mobile else "https://www.ppomppu.co.kr/zboard/"
                 link = base_url + href if not href.startswith('http') else href
 
-                # 공지 제외 (데스크톱 번호 체크)
                 if not is_mobile:
                     num_td = row.find('td', class_='eng v_middle')
                     if num_td:
                         num_text = num_td.get_text(strip=True)
-                        # 번호 자리에 이미지가 있거나 숫자가 아니면 공지/광고
                         if num_td.find('img') or not num_text.isdigit():
                             continue
 
-                # 데이터 추출
                 platform = "기타"
-                # 대괄호 안의 플랫폼 정보 추출
                 p_match = re.search(r'\[(.*?)\]', full_title)
                 if p_match: platform = p_match.group(1)
                 
                 price = extract_price(full_title)
-                # 플랫폼 표시 및 불필요한 공백 제거
                 product_name = re.sub(r'\[.*?\]', '', full_title).strip()
                 product_name = re.sub(r'\(.*?\)', '', product_name).strip()
                 
-                # 뱃지 로직 (엄마 추천 키워드 우선 적용)
                 badge = "NEW"
                 if any(keyword in product_name for keyword in RECOMMENDED_KEYWORDS):
                     badge = "엄마 추천"
@@ -166,7 +159,6 @@ def collect_from_ppomppu():
                 elif price > 100000:
                     badge = "HOT"
                 
-                # 이미지 주소 정규화
                 img_url = ""
                 if img_tag and img_tag.get('src'):
                     src = img_tag.get('src')
@@ -189,9 +181,8 @@ def collect_from_ppomppu():
                     "color": get_platform_color(platform)
                 })
                 
-                if len(collected_data) >= 30: break # 수집 수량 소폭 상향
+                if len(collected_data) >= 30: break 
             except Exception as e:
-                # 개별 항목 오류 시 로그만 남기고 다음 항목 진행
                 print(f"⚠️ 항목 파싱 중 건너뜀 (Index {idx}): {e}")
                 continue
         
@@ -199,7 +190,6 @@ def collect_from_ppomppu():
             print(f"✅ {url}에서 {len(collected_data)}개의 유효 데이터 수집 성공.")
             break
         else:
-            # 다음 URL 시도 전 약간의 대기
             time.sleep(random.uniform(1, 2))
             
     return collected_data
@@ -211,6 +201,9 @@ def save_to_csv(data):
         if not data:
             print("⚠️ [ERROR] 수집된 데이터가 최종적으로 0개입니다. 프로세스를 중단합니다.")
             sys.exit(1)
+
+        # 저장 전에 데이터 정렬 (엄마 추천이 위로 오게)
+        data.sort(key=lambda x: x['badge'] == '엄마 추천', reverse=True)
 
         with open('deals.csv', 'w', encoding='utf-8-sig', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=keys)
@@ -225,7 +218,6 @@ if __name__ == "__main__":
     print("🚀 [정밀 디버그 모드] 핫딜 수집 엔진 가동 시작")
     start_time = time.time()
     
-    # 봇 감지 회피를 위한 초기 랜덤 지연
     wait_time = random.uniform(2, 5)
     print(f"DEBUG: 봇 감지 회피를 위해 {wait_time:.1f}초 대기합니다...")
     time.sleep(wait_time)
