@@ -8,11 +8,11 @@ import time
 import random
 
 # --- 추천 필터링 키워드 (엄마 추천 & 건우 취향 저격) ---
-# 김건우 군이 좋아하는 곤충, 생물, 과학 관련 키워드를 최우선으로 배치했습니다.
+# 김건우 군(7세)이 좋아하는 곤충, 생물, 과학 관련 키워드를 최우선으로 배치했습니다.
 RECOMMENDED_KEYWORDS = [
-    # 건우 맞춤형 키워드 (곤충/생물/과학)
+    # 건우 맞춤형 키워드 (곤충/생물/과학/피규어)
     '사슴벌레', '장수풍뎅이', '곤충', '생물', '도감', '파브르', '표본', '과학잡지', 
-    '내셔널지오그래픽', '자연관찰', '관찰키트', '현미경', '돋보기', '레고', '피규어',
+    '내셔널지오그래픽', '자연관찰', '관찰키트', '현미경', '돋보기', '레고', '피규어', '공룡',
     # 유아/학생 교육용 키워드
     '유치원', '초등학교', '중학교', '고등학생', '입학', '신학기', '어린이날',
     '장난감', '교구', '학용품', '필기구', '백팩', '책가방', '문제집', '참고서',
@@ -46,7 +46,6 @@ def extract_price(title):
 
 def get_soup(url, session):
     """지정된 URL에 접속하여 BeautifulSoup 객체를 반환하며, 상세 로그를 남깁니다."""
-    # 최신 브라우저 지문을 모방하여 차단 방지
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -63,7 +62,7 @@ def get_soup(url, session):
         print(f"DEBUG: {url} 접속 시도 중...")
         response = session.get(url, headers=headers, timeout=20)
         
-        # 뽐뿌 특유의 한글 깨짐 방지 (EUC-KR 강제 지정 및 폴백)
+        # 뽐뿌 특유의 euc-kr 인코딩 강제 처리
         if response.encoding and response.encoding.lower() == 'iso-8859-1':
             response.encoding = 'euc-kr'
         elif not response.encoding or response.encoding.lower() == 'utf-8':
@@ -79,7 +78,7 @@ def get_soup(url, session):
         return None, ""
 
 def collect_from_ppomppu():
-    """뽐뿌 핫딜 게시판 수집 (데스크톱/모바일 다중 시도 및 정밀 파싱)"""
+    """뽐뿌 핫딜 게시판 수집 (데스크톱/모바일 다중 시도)"""
     session = requests.Session()
     urls = [
         "https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu", # PC 버전
@@ -98,7 +97,7 @@ def collect_from_ppomppu():
         # 차단 메시지 확인
         block_keywords = ["접속이 제한", "Robot", "자동접속", "Access Denied", "IP가 차단", "보안절차", "비정상적인 접근"]
         if any(msg in html_raw for msg in block_keywords):
-            print(f"❌ 차단 감지: {url} 버전은 현재 환경(GitHub IP 등)에서 차단되었습니다.")
+            print(f"❌ 차단 감지: {url} 버전은 현재 환경에서 차단되었습니다.")
             continue
 
         is_mobile = "m.ppomppu" in url
@@ -107,7 +106,6 @@ def collect_from_ppomppu():
         if is_mobile:
             rows = soup.select('.list_default li') or soup.select('li.common-list-item') or soup.select('.bbsList li')
         else:
-            # PC 버전 파싱 (더 넓은 선택자 적용)
             rows = soup.select('tr.list0, tr.list1') or soup.select('tr[align="center"]')
             if not rows:
                 main_table = soup.find('table', id='main_list')
@@ -127,13 +125,11 @@ def collect_from_ppomppu():
                     link_tag = row.select_one('a')
                     img_tag = row.select_one('img')
                 else:
-                    # 데스크톱 파싱 로직 보강
                     title_tag = row.find(['font', 'span'], class_='list_title') or row.select_one('a font')
                     if not title_tag: 
-                        # 클래스명이 없는 경우 게시글 제목 위치의 a 태그 탐색
                         tds = row.find_all('td')
                         if len(tds) >= 3:
-                            title_tag = tds[3].find('a') if is_mobile else tds[2].find('a')
+                            title_tag = tds[2].find('a') # PC 버전 제목 위치
                     
                     if not title_tag: continue
                     link_tag = title_tag if title_tag.name == 'a' else title_tag.find_parent('a')
@@ -166,11 +162,12 @@ def collect_from_ppomppu():
                 product_name = re.sub(r'\[.*?\]', '', full_title).strip()
                 product_name = re.sub(r'\(.*?\)', '', product_name).strip()
                 
-                # 뱃지 로직: 건우 관심사(곤충/생물) 우선 순위 부여
+                # 뱃지 로직: 건우 취향(곤충/생물) 우선 순위 부여
                 badge = "NEW"
                 if any(keyword in product_name for keyword in RECOMMENDED_KEYWORDS):
-                    # 곤충/생물 관련이면 더 특별한 강조 (로그 출력)
-                    if any(insect in product_name for insect in ['사슴벌레', '장수풍뎅이', '곤충', '생물', '도감']):
+                    # 건우 선호 키워드 체크
+                    gunwoo_keywords = ['사슴벌레', '장수풍뎅이', '곤충', '생물', '도감', '파브르', '표본', '과학잡지', '공룡']
+                    if any(gk in product_name for gk in gunwoo_keywords):
                         badge = "건우&엄마 추천"
                         print(f"⭐ [건우 취향 저격] 발견: {product_name}")
                     else:
@@ -204,7 +201,7 @@ def collect_from_ppomppu():
                 })
                 
                 if len(collected_data) >= 30: break 
-            except Exception as e:
+            except Exception:
                 continue
         
         if collected_data:
@@ -250,4 +247,5 @@ if __name__ == "__main__":
         print("\n❌ [최종 실패] 모든 경로가 차단되었거나 구조가 완전히 변경되었습니다.")
         sys.exit(1)
         
-    print(f"⏱️ 총 소요 시간: {time.time() - start_time:.2f}초")
+    end_time = time.time()
+    print(f"⏱️ 총 소요 시간: {end_time - start_time:.2f}초")
