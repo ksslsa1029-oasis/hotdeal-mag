@@ -8,7 +8,7 @@ import time
 import random
 
 # --- 추천 필터링 키워드 (엄마 추천 & 건우 취향 저격) ---
-# 김건우 군(7세)이 좋아하는 곤충, 생물, 과학 관련 키워드를 최우선으로 배치했습니다.
+# 7살 아들 건우가 좋아하는 곤충, 생물 관련 키워드와 교육용품 리스트입니다.
 RECOMMENDED_KEYWORDS = [
     # 건우 맞춤형 키워드 (곤충/생물/과학/피규어)
     '사슴벌레', '장수풍뎅이', '곤충', '생물', '도감', '파브르', '표본', '과학잡지', 
@@ -60,7 +60,7 @@ def get_soup(url, session):
     
     try:
         print(f"DEBUG: {url} 접속 시도 중...")
-        response = session.get(url, headers=headers, timeout=20)
+        response = session.get(url, headers=headers, timeout=25)
         
         # 뽐뿌 특유의 euc-kr 인코딩 강제 처리
         if response.encoding and response.encoding.lower() == 'iso-8859-1':
@@ -97,7 +97,7 @@ def collect_from_ppomppu():
         # 차단 메시지 확인
         block_keywords = ["접속이 제한", "Robot", "자동접속", "Access Denied", "IP가 차단", "보안절차", "비정상적인 접근"]
         if any(msg in html_raw for msg in block_keywords):
-            print(f"❌ 차단 감지: {url} 버전은 현재 환경에서 차단되었습니다.")
+            print(f"❌ 차단 감지: {url} 버전은 현재 GitHub Actions 환경에서 차단되었습니다.")
             continue
 
         is_mobile = "m.ppomppu" in url
@@ -115,7 +115,7 @@ def collect_from_ppomppu():
         print(f"🔎 후보 항목 {len(rows)}개 발견.")
 
         if not rows:
-            print(f"⚠️ {url}에서 유효한 데이터 행을 찾지 못했습니다.")
+            print(f"⚠️ {url}에서 유효한 데이터 행을 찾지 못했습니다. 구조 분석이 필요합니다.")
             continue
 
         for idx, row in enumerate(rows):
@@ -164,12 +164,13 @@ def collect_from_ppomppu():
                 
                 # 뱃지 로직: 건우 취향(곤충/생물) 우선 순위 부여
                 badge = "NEW"
+                is_gunwoo_pick = False
                 if any(keyword in product_name for keyword in RECOMMENDED_KEYWORDS):
                     # 건우 선호 키워드 체크
                     gunwoo_keywords = ['사슴벌레', '장수풍뎅이', '곤충', '생물', '도감', '파브르', '표본', '과학잡지', '공룡']
                     if any(gk in product_name for gk in gunwoo_keywords):
                         badge = "건우&엄마 추천"
-                        print(f"⭐ [건우 취향 저격] 발견: {product_name}")
+                        is_gunwoo_pick = True
                     else:
                         badge = "엄마 추천"
                 elif price > 100000:
@@ -187,6 +188,9 @@ def collect_from_ppomppu():
                 if not img_url:
                     img_url = f"https://placehold.co/80x80/f1f5f9/94a3b8?text={platform[:1]}"
 
+                if is_gunwoo_pick:
+                    print(f"⭐ [건우 맞춤 핫딜 발견!] {product_name}")
+
                 collected_data.append({
                     "category": "핫딜",
                     "platform": platform,
@@ -200,14 +204,15 @@ def collect_from_ppomppu():
                     "color": get_platform_color(platform)
                 })
                 
-                if len(collected_data) >= 30: break 
-            except Exception:
+                if len(collected_data) >= 40: break # 더 풍성한 잡지를 위해 40개까지 수집
+            except Exception as e:
                 continue
         
         if collected_data:
             print(f"✅ {url}에서 {len(collected_data)}개의 유효 데이터 수집 성공.")
             break
         else:
+            print(f"⚠️ {url}에서 데이터를 가져오지 못했습니다. 다음 경로를 시도합니다.")
             time.sleep(random.uniform(2.0, 4.0))
             
     return collected_data
@@ -217,7 +222,7 @@ def save_to_csv(data):
     keys = ["category", "platform", "productName", "currentPrice", "originalPrice", "badge", "sourceSite", "link", "image", "color"]
     try:
         if not data:
-            print("⚠️ [ERROR] 수집된 데이터가 최종적으로 0개입니다.")
+            print("⚠️ [ERROR] 수집된 데이터가 최종적으로 0개입니다. 저장을 중단합니다.")
             sys.exit(1)
 
         # '건우&엄마 추천' 아이템이 가장 위로 오게 정렬
@@ -244,7 +249,7 @@ if __name__ == "__main__":
     if deals:
         save_to_csv(deals)
     else:
-        print("\n❌ [최종 실패] 모든 경로가 차단되었거나 구조가 완전히 변경되었습니다.")
+        print("\n❌ [최종 실패] 모든 경로(PC/모바일)가 차단되었거나 사이트 구조가 완전히 변경되었습니다.")
         sys.exit(1)
         
     end_time = time.time()
